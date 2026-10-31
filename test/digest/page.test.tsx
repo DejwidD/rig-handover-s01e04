@@ -127,4 +127,51 @@ describe('digest JSON endpoint', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });
+
+  it('skips malformed lines while returning valid rows', async () => {
+    const dir = runsDir();
+    writeFileSync(
+      join(dir, '2026-10-28.jsonl'),
+      'not json\n{"at":"2026-10-28T01:00:00+01:00","job":"valid","status":"ok","owner":"rook"}\n',
+    );
+
+    const res = await createApp({ ...config, runsDir: dir }).request('/api/digest/2026-10-28');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      {
+        job: 'valid',
+        owner: 'rook',
+        runs: 1,
+        retries: 0,
+        status: 'ok',
+        error: null,
+        firstAt: '2026-10-28T01:00:00+01:00',
+        lastAt: '2026-10-28T01:00:00+01:00',
+      },
+    ]);
+  });
+
+  it('keeps page rows in the same order as JSON rows', async () => {
+    const dir = runsDir();
+    writeFileSync(
+      join(dir, '2026-10-28.jsonl'),
+      [
+        '{"at":"2026-10-28T02:00:00+01:00","job":"z-job","status":"fail","owner":"rook"}',
+        'not json',
+        '{"at":"2026-10-28T01:00:00+01:00","job":"a-job","status":"ok","owner":null}',
+      ].join('\n'),
+    );
+    const app = createApp({ ...config, runsDir: dir });
+
+    const page = await app.request('/digest/2026-10-28');
+    const html = await page.text();
+    const json = await app.request('/api/digest/2026-10-28');
+
+    expect(page.status).toBe(200);
+    expect(json.status).toBe(200);
+    const rows = (await json.json()) as Array<{ job: string }>;
+    expect(rows.map((row) => row.job)).toEqual(['a-job', 'z-job']);
+    expect(html.indexOf('a-job')).toBeLessThan(html.indexOf('z-job'));
+  });
 });
