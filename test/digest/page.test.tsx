@@ -76,3 +76,55 @@ describe('digest page', () => {
     expect(await res.text()).toContain('valid');
   });
 });
+
+describe('digest JSON endpoint', () => {
+  it('returns the reader rows in sorted order', async () => {
+    const dir = runsDir();
+    writeFileSync(
+      join(dir, '2026-10-28.jsonl'),
+      [
+        '{"at":"2026-10-28T02:00:00+01:00","job":"z-job","status":"fail","owner":"rook","error":"boom"}',
+        '{"at":"2026-10-28T01:00:00+01:00","job":"a-job","status":"retry","owner":null}',
+      ].join('\n'),
+    );
+
+    const res = await createApp({ ...config, runsDir: dir }).request('/api/digest/2026-10-28');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      {
+        job: 'a-job',
+        owner: null,
+        runs: 1,
+        retries: 1,
+        status: 'retry',
+        error: null,
+        firstAt: '2026-10-28T01:00:00+01:00',
+        lastAt: '2026-10-28T01:00:00+01:00',
+      },
+      {
+        job: 'z-job',
+        owner: 'rook',
+        runs: 1,
+        retries: 0,
+        status: 'fail',
+        error: 'boom',
+        firstAt: '2026-10-28T02:00:00+01:00',
+        lastAt: '2026-10-28T02:00:00+01:00',
+      },
+    ]);
+  });
+
+  it('returns 404 for a missing night and an empty array for an empty night', async () => {
+    const dir = runsDir();
+    const app = createApp({ ...config, runsDir: dir });
+
+    expect((await app.request('/api/digest/2026-10-28')).status).toBe(404);
+
+    writeFileSync(join(dir, '2026-10-28.jsonl'), '');
+    const res = await app.request('/api/digest/2026-10-28');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+});
